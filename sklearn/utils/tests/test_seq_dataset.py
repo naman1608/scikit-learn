@@ -5,7 +5,6 @@
 
 import numpy as np
 import pytest
-import scipy.sparse as sp
 from numpy.testing import assert_array_equal
 
 from sklearn.datasets import load_iris
@@ -16,16 +15,17 @@ from sklearn.utils._seq_dataset import (
     CSRDataset64,
 )
 from sklearn.utils._testing import assert_allclose
+from sklearn.utils.fixes import CSR_CONTAINERS
 
 iris = load_iris()
 X64 = iris.data.astype(np.float64)
 y64 = iris.target.astype(np.float64)
-X_csr64 = sp.csr_matrix(X64)
+# X_csr64 = sp.csr_matrix(X64)
 sample_weight64 = np.arange(y64.size, dtype=np.float64)
 
 X32 = iris.data.astype(np.float32)
 y32 = iris.target.astype(np.float32)
-X_csr32 = sp.csr_matrix(X32)
+# X_csr32 = sp.csr_matrix(X32)
 sample_weight32 = np.arange(y32.size, dtype=np.float32)
 
 
@@ -40,21 +40,23 @@ def assert_csr_equal_values(current, expected):
     assert_array_equal(current.indptr, expected.indptr)
 
 
-def make_dense_dataset_32():
+def make_dense_dataset_32(csr_container):
     return ArrayDataset32(X32, y32, sample_weight32, seed=42)
 
 
-def make_dense_dataset_64():
+def make_dense_dataset_64(csr_container):
     return ArrayDataset64(X64, y64, sample_weight64, seed=42)
 
 
-def make_sparse_dataset_32():
+def make_sparse_dataset_32(csr_container):
+    X_csr32 = csr_container(X32)
     return CSRDataset32(
         X_csr32.data, X_csr32.indptr, X_csr32.indices, y32, sample_weight32, seed=42
     )
 
 
-def make_sparse_dataset_64():
+def make_sparse_dataset_64(csr_container):
+    X_csr64 = csr_container(X64)
     return CSRDataset64(
         X_csr64.data, X_csr64.indptr, X_csr64.indices, y64, sample_weight64, seed=42
     )
@@ -69,13 +71,15 @@ def make_sparse_dataset_64():
         make_sparse_dataset_64,
     ],
 )
-def test_seq_dataset_basic_iteration(dataset_constructor):
+@pytest.mark.parametrize("csr_container", CSR_CONTAINERS)
+def test_seq_dataset_basic_iteration(dataset_constructor, csr_container):
     NUMBER_OF_RUNS = 5
-    dataset = dataset_constructor()
+    dataset = dataset_constructor(csr_container)
+    X_csr64 = csr_container(X64)
     for _ in range(NUMBER_OF_RUNS):
         # next sample
         xi_, yi, swi, idx = dataset._next_py()
-        xi = sp.csr_matrix((xi_), shape=(1, X64.shape[1]))
+        xi = csr_container((xi_), shape=(1, X64.shape[1]))
 
         assert_csr_equal_values(xi, X_csr64[idx])
         assert yi == y64[idx]
@@ -83,7 +87,7 @@ def test_seq_dataset_basic_iteration(dataset_constructor):
 
         # random sample
         xi_, yi, swi, idx = dataset._random_py()
-        xi = sp.csr_matrix((xi_), shape=(1, X64.shape[1]))
+        xi = csr_container((xi_), shape=(1, X64.shape[1]))
 
         assert_csr_equal_values(xi, X_csr64[idx])
         assert yi == y64[idx]
@@ -152,7 +156,10 @@ def test_fused_types_consistency(make_dataset_32, make_dataset_64):
         assert_allclose(yi64, yi32, rtol=1e-5)
 
 
-def test_buffer_dtype_mismatch_error():
+@pytest.mark.parametrize("csr_container", CSR_CONTAINERS)
+def test_buffer_dtype_mismatch_error(csr_container):
+    X_csr32 = csr_container(X32)
+    X_csr64 = csr_container(X64)
     with pytest.raises(ValueError, match="Buffer dtype mismatch"):
         ArrayDataset64(X32, y32, sample_weight32, seed=42),
 
